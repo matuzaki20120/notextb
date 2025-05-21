@@ -66,6 +66,13 @@
         .btn-secondary:hover {
             background-color: #4b5563; /* Tailwind bg-gray-600 */
         }
+        .btn-neutral { /* クリアボタン用スタイル */
+            background-color: #a1a1aa; /* Tailwind zinc-400 */
+            color: white;
+        }
+        .btn-neutral:hover {
+            background-color: #71717a; /* Tailwind zinc-500 */
+        }
         .btn-warning {
             background-color: #f59e0b; /* Tailwind bg-amber-500 */
             padding: 0.25rem 0.5rem;
@@ -135,13 +142,18 @@
             border-bottom: 1px solid #f3f4f6; 
         }
         .bookmark-item:last-child { border-bottom: none; }
-        .bookmark-title-display {
+        .bookmark-link { 
+            color: #3b82f6; 
+            text-decoration: none;
+            cursor: pointer;
             flex-grow: 1;
-            margin-right: 0.5rem;
-            cursor: pointer; 
+            margin-right: 0.5rem; 
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+        .bookmark-link:hover {
+            text-decoration: underline;
         }
         .bookmark-title-edit { 
             flex-grow: 1;
@@ -165,8 +177,9 @@
         </div>
 
         <div class="flex space-x-2 mb-4">
-            <button id="fetchButton" class="btn w-1/2">ページ内容を取得</button>
-            <button id="addBookmarkButton" class="btn btn-secondary w-1/2">ブックマークに追加</button>
+            <button id="fetchButton" class="btn w-1/3">ページ内容を取得</button>
+            <button id="addBookmarkButton" class="btn btn-secondary w-1/3">ブックマークに追加</button>
+            <button id="clearButton" class="btn btn-neutral w-1/3">入力/表示をクリア</button>
         </div>
 
         <div id="statusMessage" class="status-message" style="display: none;"></div>
@@ -187,6 +200,7 @@
         const urlInput = document.getElementById('urlInput');
         const fetchButton = document.getElementById('fetchButton');
         const addBookmarkButton = document.getElementById('addBookmarkButton');
+        const clearButton = document.getElementById('clearButton');
         const textOutputDiv = document.getElementById('textOutput');
         const pageContentDiv = document.getElementById('pageContent');
         const pageTitleHeader = document.getElementById('pageTitleHeader');
@@ -221,171 +235,44 @@
             ]
         };
 
-        const SW_CONTENT = `
-            const CACHE_NAME = 'text-browser-cache-v4'; // Cache version incremented
-            // MAIN_HTML_URL will be dynamically determined inside the SW.
-            // Other assets like Tailwind will be cached on first fetch.
-
-            self.addEventListener('install', event => {
-                console.log('[SW] Install event for version:', CACHE_NAME);
-                // self.skipWaiting(); // Optional: uncomment to activate new SW immediately
-                event.waitUntil(
-                    caches.open(CACHE_NAME)
-                        .then(cache => {
-                            console.log('[SW] Opened cache:', CACHE_NAME);
-                            // Determine the URL of the HTML file that registered this SW
-                            // self.registration.scope should give the base path.
-                            // If start_url is '.', the main HTML is at the root of the scope.
-                            const mainHtmlUrl = new URL('.', self.registration.scope).href;
-                            console.log('[SW] Attempting to cache main HTML:', mainHtmlUrl);
-                            return cache.add(mainHtmlUrl); 
-                        })
-                        .then(() => {
-                            console.log('[SW] Main HTML cached successfully during install.');
-                        })
-                        .catch(error => {
-                            console.error('[SW] Failed to cache main HTML during install. URL attempted:', new URL('.', self.registration.scope).href, error);
-                            // It's critical that the main HTML is cached for offline use.
-                            // If this fails, the SW installation should ideally fail to indicate a problem.
-                            throw error; 
-                        })
-                );
-            });
-
-            self.addEventListener('activate', event => {
-                console.log('[SW] Activate event for version:', CACHE_NAME);
-                const cacheWhitelist = [CACHE_NAME];
-                event.waitUntil(
-                    caches.keys().then(cacheNames => {
-                        return Promise.all(
-                            cacheNames.map(cacheName => {
-                                if (cacheWhitelist.indexOf(cacheName) === -1) {
-                                    console.log('[SW] Deleting old cache:', cacheName);
-                                    return caches.delete(cacheName);
-                                }
-                            })
-                        );
-                    }).then(() => {
-                        console.log('[SW] Old caches deleted, claiming clients.');
-                        return self.clients.claim();
-                    })
-                );
-            });
-
-            self.addEventListener('fetch', event => {
-                const requestUrl = new URL(event.request.url);
-                const tailwindUrl = 'https://cdn.tailwindcss.com/'; // Ensure trailing slash if CDN redirects
-
-                // 1. Proxy API calls - Network only
-                if (requestUrl.hostname === 'api.allorigins.win') {
-                    event.respondWith(fetch(event.request));
-                    return;
-                }
-
-                // 2. Navigation requests (HTML document itself) - Network first, then cache
-                if (event.request.mode === 'navigate') {
-                    event.respondWith(
-                        fetch(event.request)
-                            .then(networkResponse => {
-                                if (networkResponse.ok) {
-                                    console.log('[SW] Navigation request successful, caching:', event.request.url);
-                                    const responseToCache = networkResponse.clone();
-                                    caches.open(CACHE_NAME).then(cache => {
-                                        cache.put(event.request, responseToCache);
-                                    });
-                                }
-                                return networkResponse;
-                            })
-                            .catch(() => {
-                                console.log('[SW] Navigation network request failed, trying cache for:', event.request.url);
-                                // Try to serve the main HTML page from cache.
-                                const mainHtmlUrlToMatch = new URL('.', self.registration.scope).href;
-                                return caches.match(mainHtmlUrlToMatch).then(cachedResponse => {
-                                    if (cachedResponse) {
-                                        console.log('[SW] Serving main HTML from cache:', mainHtmlUrlToMatch);
-                                        return cachedResponse;
-                                    }
-                                    // Fallback if the specific resolved URL isn't found
-                                    return caches.match(event.request).then(genericCachedResponse => {
-                                        if(genericCachedResponse) {
-                                             console.log('[SW] Serving other HTML from cache:', event.request.url);
-                                             return genericCachedResponse;
-                                        }
-                                        console.error('[SW] No cached response found for navigation and network failed:', event.request.url);
-                                        // Consider returning a generic offline fallback page here
-                                        // return new Response("<h1>Offline</h1><p>The page could not be loaded.</p>", { headers: { 'Content-Type': 'text/html' }});
-                                    });
-                                });
-                            })
-                    );
-                    return;
-                }
-
-                // 3. Tailwind CSS - Cache first, then network
-                // Check startsWith because the exact URL might have query params or slight variations from CDN
-                if (requestUrl.href.startsWith(tailwindUrl)) {
-                    event.respondWith(
-                        caches.match(event.request)
-                            .then(cachedResponse => {
-                                if (cachedResponse) {
-                                    console.log('[SW] Serving Tailwind CSS from cache for:', event.request.url);
-                                    return cachedResponse;
-                                }
-                                console.log('[SW] Tailwind CSS not in cache, fetching from network:', event.request.url);
-                                return fetch(event.request).then(networkResponse => {
-                                    if (networkResponse && networkResponse.ok) {
-                                        console.log('[SW] Caching Tailwind CSS for:', event.request.url);
-                                        const responseToCache = networkResponse.clone();
-                                        caches.open(CACHE_NAME).then(cache => {
-                                            cache.put(event.request, responseToCache);
-                                        });
-                                    } else if (networkResponse) {
-                                        console.warn('[SW] Network request for Tailwind CSS failed or not ok:', networkResponse.status, event.request.url);
-                                    } else {
-                                         console.warn('[SW] Network request for Tailwind CSS failed (no response):', event.request.url);
-                                    }
-                                    return networkResponse;
-                                }).catch(error => {
-                                    console.error('[SW] Error fetching Tailwind CSS from network:', event.request.url, error);
-                                    throw error; 
-                                });
-                            })
-                    );
-                    return;
-                }
-            });
-        `;
+        // Service Worker content is removed due to Blob URL protocol issues in the environment.
+        // const SW_CONTENT_V5 = ` ... ` ; // Removed
 
         function setupPWA() {
+            console.log('[PWA Setup] Starting PWA setup...');
+            // Protocol check (remains for general PWA context, though SW is now disabled)
+            if (document.location.protocol !== 'https:' && 
+                document.location.hostname !== 'localhost' && 
+                !document.location.hostname.endsWith('.localhost') &&
+                document.location.hostname !== '127.0.0.1'
+            ) {
+                console.warn('[PWA Setup] Page not served over HTTPS or from localhost. Some PWA features might be limited. Protocol:', document.location.protocol, 'Hostname:', document.location.hostname);
+                // showStatus('警告: PWA機能はHTTPSまたはローカル開発環境でないと限定的です。', 'error'); // Optional: less alarming message
+            } else {
+                console.log('[PWA Setup] Page is served over a secure context.');
+            }
+
+            // Create and link manifest (this part can still work for "Add to Home Screen" etc.)
             try {
                 const manifestBlob = new Blob([JSON.stringify(MANIFEST_CONTENT)], { type: 'application/json' });
                 const manifestURL = URL.createObjectURL(manifestBlob);
                 const manifestLinkElement = document.getElementById('manifestLink');
                 if (manifestLinkElement) {
                     manifestLinkElement.setAttribute('href', manifestURL);
+                    console.log('[PWA Setup] Manifest link set to:', manifestURL);
                 } else {
-                    console.warn('Manifest link element not found.');
+                    console.warn('[PWA Setup] Manifest link element not found.');
                 }
             } catch (e) {
-                console.error('Error creating manifest Blob URL:', e);
+                console.error('[PWA Setup] Error creating manifest Blob URL:', e);
             }
 
+            // Service Worker registration is removed.
             if ('serviceWorker' in navigator) {
-                try {
-                    const swBlob = new Blob([SW_CONTENT], { type: 'application/javascript' });
-                    const swURL = URL.createObjectURL(swBlob);
-                    navigator.serviceWorker.register(swURL, { scope: './' }) 
-                        .then(registration => {
-                            console.log('Service Worker registered with scope:', registration.scope);
-                        })
-                        .catch(error => {
-                            console.error('Service Worker registration failed:', error, 'Attempted SW URL:', swURL);
-                        });
-                } catch (e) {
-                     console.error('Error creating Service Worker Blob URL:', e);
-                }
+                console.log('[PWA Setup] Service Worker API is available, but registration from Blob URL is not supported in this environment and has been disabled to prevent errors.');
+                showStatus('情報: Service Workerによるオフライン機能はこの環境では利用できません。', 'error'); // Inform user
             } else {
-                console.warn('Service Worker not supported in this browser.');
+                console.warn('[PWA Setup] Service Worker not supported in this browser.');
             }
         }
 
@@ -401,6 +288,19 @@
             if (event.key === 'Enter') handleFetchButtonClick();
         });
         addBookmarkButton.addEventListener('click', handleAddBookmark);
+        clearButton.addEventListener('click', handleClearContent);
+
+        function handleClearContent() {
+            urlInput.value = '';
+            pageTitleHeader.textContent = '';
+            pageTitleHeader.style.display = 'none';
+            pageContentDiv.innerHTML = '';
+            textOutputDiv.style.display = 'none'; 
+            currentPageInfo = { title: '', url: '' };
+            statusMessageDiv.textContent = '';
+            statusMessageDiv.style.display = 'none';
+            showStatus('入力と表示をクリアしました。', 'success');
+        }
 
         function loadBookmarks() {
             const storedBookmarks = localStorage.getItem('textOnlyBrowserBookmarks');
@@ -436,24 +336,19 @@
                 const li = document.createElement('li');
                 li.className = 'bookmark-item';
 
-                const titleSpan = document.createElement('span');
-                titleSpan.className = 'bookmark-title-display';
-                titleSpan.textContent = bookmark.title;
-                titleSpan.title = `${bookmark.title} (${bookmark.url})`;
-                titleSpan.addEventListener('click', () => {
-                    enableEditMode(li, titleSpan, bookmark, index);
-                });
-                
                 const link = document.createElement('a');
-                link.href = '#';
-                link.appendChild(titleSpan); 
+                link.href = '#'; 
+                link.className = 'bookmark-link'; 
+                link.textContent = bookmark.title;
+                link.title = `${bookmark.title} (${bookmark.url})`; 
+                
                 link.addEventListener('click', (e) => {
                     e.preventDefault();
                     if (!li.querySelector('.bookmark-title-edit')) {
-                         fetchPageContent(bookmark.url);
+                        fetchPageContent(bookmark.url);
                     }
                 });
-
+                
                 const actionsDiv = document.createElement('div');
                 actionsDiv.className = 'bookmark-actions';
 
@@ -462,7 +357,7 @@
                 editButton.textContent = '編集';
                 editButton.addEventListener('click', (e) => {
                     e.stopPropagation(); 
-                    enableEditMode(li, titleSpan, bookmark, index);
+                    enableEditMode(li, link, bookmark, index); 
                 });
 
                 const deleteButton = document.createElement('button');
@@ -484,31 +379,38 @@
             });
         }
         
-        function enableEditMode(listItem, titleSpanToReplace, bookmark, index) {
+        function enableEditMode(listItem, linkElementToEdit, bookmark, index) {
             document.querySelectorAll('.bookmark-title-edit').forEach(input => {
                 const parentLi = input.closest('.bookmark-item');
-                if (parentLi && parentLi !== listItem) {
-                    const originalBookmark = bookmarks.find(b => b.url === parentLi.dataset.url);
+                if (parentLi && parentLi !== listItem) { 
+                    const originalBookmark = bookmarks.find(b => b.url === parentLi.dataset.bookmarkUrl); 
                     if (originalBookmark) {
-                        const oldTitleSpan = document.createElement('span');
-                        oldTitleSpan.className = 'bookmark-title-display';
-                        oldTitleSpan.textContent = originalBookmark.title;
-                        oldTitleSpan.title = `${originalBookmark.title} (${originalBookmark.url})`;
-                        oldTitleSpan.addEventListener('click', () => {
-                            const bm = bookmarks.find(b => b.url === parentLi.dataset.url);
-                            const idx = bookmarks.findIndex(b => b.url === parentLi.dataset.url);
-                            if(bm && idx !== -1) enableEditMode(parentLi, oldTitleSpan, bm, idx);
+                        const oldLink = document.createElement('a');
+                        oldLink.href = '#';
+                        oldLink.className = 'bookmark-link';
+                        oldLink.textContent = originalBookmark.title;
+                        oldLink.title = `${originalBookmark.title} (${originalBookmark.url})`;
+                        oldLink.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            if (!parentLi.querySelector('.bookmark-title-edit')) {
+                                fetchPageContent(originalBookmark.url);
+                            }
                         });
-                        input.replaceWith(oldTitleSpan);
+                        const currentLinkElement = parentLi.querySelector('a.bookmark-link, .bookmark-title-edit');
+                        if(currentLinkElement && currentLinkElement.parentElement) {
+                            currentLinkElement.parentElement.replaceChild(oldLink, currentLinkElement);
+                        } else if (input.parentElement) { 
+                             input.parentElement.replaceChild(oldLink, input);
+                        }
                     }
                 }
             });
 
             const inputField = document.createElement('input');
             inputField.type = 'text';
-            inputField.className = 'bookmark-title-edit';
+            inputField.className = 'bookmark-title-edit'; 
             inputField.value = bookmark.title;
-            listItem.dataset.url = bookmark.url;
+            listItem.dataset.bookmarkUrl = bookmark.url; 
             const originalTitle = bookmark.title; 
 
             const saveChanges = () => {
@@ -525,9 +427,7 @@
                 renderBookmarks(); 
             };
 
-            inputField.addEventListener('blur', () => {
-                setTimeout(saveChanges, 100);
-            });
+            inputField.addEventListener('blur', saveChanges);
             inputField.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
@@ -538,9 +438,8 @@
                 }
             });
             
-            const linkElement = titleSpanToReplace.parentElement; 
-            linkElement.innerHTML = ''; 
-            linkElement.appendChild(inputField); 
+            linkElementToEdit.innerHTML = ''; 
+            linkElementToEdit.appendChild(inputField); 
             
             inputField.focus();
             inputField.select();
@@ -565,6 +464,7 @@
             showStatus('ページを取得中...', 'loading');
             fetchButton.disabled = true;
             addBookmarkButton.disabled = true; 
+            clearButton.disabled = true; 
             textOutputDiv.style.display = 'none';
             pageTitleHeader.style.display = 'none';
             pageContentDiv.innerHTML = ''; 
@@ -600,6 +500,7 @@
             } finally {
                 fetchButton.disabled = false;
                 addBookmarkButton.disabled = false; 
+                clearButton.disabled = false; 
             }
         }
 
@@ -711,7 +612,7 @@
             statusMessageDiv.style.display = 'block';
 
             if (type !== 'loading') {
-                setTimeout(() => { statusMessageDiv.style.display = 'none'; }, 3000);
+                setTimeout(() => { statusMessageDiv.style.display = 'none'; }, 5000); // エラーメッセージの表示時間を5秒に延長
             }
         }
     </script>
